@@ -127,8 +127,10 @@ struct ExpenseListView: View {
             .sheet(isPresented: $showingAddExpense) {
                 AddExpenseView()
             }
-            .sheet(item: $selectedExpense) { expense in
-                ExpenseDetailView(expense: expense)
+            .sheet(isPresented: $showingExpenseDetail) {
+                if let expense = selectedExpense {
+                    ExpenseDetailView(expense: expense)
+                }
             }
         }
     }
@@ -225,12 +227,12 @@ struct ExpenseListView: View {
                 )
             }
             
-            SummaryCard(
-                title: "Count",
-                count: filteredExpenses.count,
-                icon: "number.circle.fill",
-                color: ThemeColors.success
-            )
+//            SummaryCard(
+//                title: "Count",
+//                count: filteredExpenses.count,
+//                icon: "number.circle.fill",
+//                color: ThemeColors.success
+//            )
         }
         .padding(.horizontal)
         .padding(.bottom)
@@ -280,7 +282,7 @@ struct ExpenseListView: View {
         }
         .listStyle(PlainListStyle())
         .refreshable {
-            // Refresh data
+            // Pull-to-refresh manual sync
             await refreshData()
         }
     }
@@ -408,12 +410,13 @@ struct ExpenseListView: View {
     }
     
     private func refreshData() async {
-        // Refresh data from DataManager if needed
-        print("Refreshing expense data...")
+        // Trigger manual sync via ExpenseStore
+        expenseStore.performManualSync()
+        print("🔄 ExpenseListView: Manual sync triggered")
     }
 }
 
-// MARK: - Enhanced Expense Row
+// MARK: - Enhanced Expense List Row
 struct ExpenseListRowView: View {
     let expense: Expense
     
@@ -545,13 +548,13 @@ struct SummaryCard: View {
                 
                 if let amount = amount {
                     Text(formatCurrency(amount))
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(.title)
+                        .fontWeight(.bold)
                         .foregroundColor(ThemeColors.text)
                 } else if let count = count {
                     Text("\(count)")
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(.title)
+                        .fontWeight(.bold)
                         .foregroundColor(ThemeColors.text)
                 }
             }
@@ -638,7 +641,7 @@ struct FilterOptionsView: View {
     }
 }
 
-// MARK: - Expense Detail View
+// MARK: - Expense Detail View (Simplified)
 struct ExpenseDetailView: View {
     let expense: Expense
     @Environment(\.dismiss) private var dismiss
@@ -735,25 +738,6 @@ struct ExpenseDetailView: View {
                 }
                 #endif
             }
-        }
-    }
-}
-
-struct DetailRow: View {
-    let label: String
-    let value: String
-    var valueColor: Color = ThemeColors.text
-    
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundColor(ThemeColors.secondaryText)
-            Spacer()
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(valueColor)
         }
     }
 }

@@ -6,8 +6,6 @@
 //
 
 
-// MARK: - Updated ExpenseStore to use DataManager
-// ExpenseStore.swift
 import Foundation
 import Combine
 
@@ -17,6 +15,8 @@ class ExpenseStore: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var syncStatus: String = "Ready"
+    @Published var lastSyncDate: Date?
+    @Published var hasPendingChanges = false
     
     private let dataManager = DataManager.shared
     private var cancellables = Set<AnyCancellable>()
@@ -35,20 +35,19 @@ class ExpenseStore: ObservableObject {
             .assign(to: \.errorMessage, on: self)
             .store(in: &cancellables)
         
+        // Map sync status to display text
         dataManager.$syncStatus
-            .map { status in
-                switch status {
-                case .idle:
-                    return "Ready"
-                case .syncing:
-                    return "Syncing..."
-                case .success:
-                    return "Synced"
-                case .error(let message):
-                    return "Error: \(message)"
-                }
-            }
+            .map { $0.displayText }
             .assign(to: \.syncStatus, on: self)
+            .store(in: &cancellables)
+        
+        // Subscribe to sync metadata - now using @Published properties
+        dataManager.$lastSyncDate
+            .assign(to: \.lastSyncDate, on: self)
+            .store(in: &cancellables)
+        
+        dataManager.$hasPendingChanges
+            .assign(to: \.hasPendingChanges, on: self)
             .store(in: &cancellables)
     }
     
@@ -67,6 +66,13 @@ class ExpenseStore: ObservableObject {
     func updateExpense(_ expense: Expense) {
         Task {
             await dataManager.updateExpense(expense)
+        }
+    }
+    
+    // Manual sync function for pull-to-refresh
+    func performManualSync() {
+        Task {
+            await dataManager.performManualSync()
         }
     }
     

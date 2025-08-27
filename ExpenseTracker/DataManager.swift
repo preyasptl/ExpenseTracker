@@ -11,6 +11,7 @@ import Combine
 import Foundation
 import FirebaseFirestore
 
+// MARK: - Hybrid Core Data-First DataManager
 @MainActor
 class DataManager: ObservableObject {
     static let shared = DataManager()
@@ -21,94 +22,64 @@ class DataManager: ObservableObject {
     @Published var expenses: [Expense] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var syncStatus: FirebaseService.SyncStatus = .idle
+    @Published var syncStatus: SyncStatus = .idle
     
+    // Changed from computed properties to @Published properties
+    @Published private(set) var lastSyncDate: Date?
+    @Published private(set) var hasPendingChanges = false
+    
+    // Sync state tracking
     private var cancellables = Set<AnyCancellable>()
-    private var firebaseListener: ListenerRegistration?
+    private let syncQueue = DispatchQueue(label: "firebase.sync", qos: .background)
+    
+    enum SyncStatus {
+        case idle
+        case syncing
+        case success
+        case error(String)
+        
+        var displayText: String {
+            switch self {
+            case .idle: return "Ready"
+            case .syncing: return "Syncing..."
+            case .success: return "Synced"
+            case .error(let message): return "Error: \(message)"
+            }
+        }
+    }
     
     init() {
-        print("📊 DataManager: Initializing...")
-        
-        // Monitor Firebase sync status
-        firebaseService.$syncStatus
-            .assign(to: \.syncStatus, on: self)
-            .store(in: &cancellables)
-        
-        // Monitor authentication state - FIXED: Only set up listener once
-        firebaseService.$isSignedIn
-            .sink { [weak self] isSignedIn in
-                print("🔐 DataManager: Auth state changed - isSignedIn: \(isSignedIn)")
-                if isSignedIn {
-                    print("✅ DataManager: User signed in, setting up Firebase listener")
-                    self?.setupFirebaseListener()
-                    // Only sync pending expenses, not all expenses (listener handles that)
-                    Task {
-                        await self?.syncPendingExpensesOnly()
-                    }
-                } else {
-                    print("❌ DataManager: User signed out, removing Firebase listener")
-                    self?.firebaseListener?.remove()
-                }
-            }
-            .store(in: &cancellables)
+        print("📊 DataManager: Initializing with Core Data-first architecture...")
         
         // Load local data immediately
         loadLocalExpenses()
         
-        // Sign in anonymously if not signed in
-        if !firebaseService.isSignedIn {
-            print("🔄 DataManager: Attempting anonymous sign in...")
-            Task {
-                do {
-                    try await firebaseService.signInAnonymously()
-                    print("✅ DataManager: Anonymous sign in successful")
-                } catch {
-                    print("❌ DataManager: Anonymous sign in failed: \(error)")
-                }
-            }
-        }
-    }
-    
-    deinit {
-        firebaseListener?.remove()
-    }
-    
-    // Add this new method that only syncs pending expenses
-    private func syncPendingExpensesOnly() async {
-        print("🔄 DataManager: Syncing pending expenses...")
-        let context = persistenceController.viewContext
-        let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
-        request.predicate = NSPredicate(format: "needsSync == YES AND isRemoved == NO")
+        // Update pending changes status on init
+        updatePendingChangesStatus()
         
-        do {
-            let pendingExpenses = try context.fetch(request)
-            print("📋 DataManager: Found \(pendingExpenses.count) pending expenses to sync")
-            
-            for cdExpense in pendingExpenses {
-                let expense = Expense(
-                    id: cdExpense.wrappedId,
-                    title: cdExpense.wrappedTitle,
-                    amount: cdExpense.amount,
-                    category: cdExpense.expenseCategory,
-                    date: cdExpense.wrappedDate,
-                    notes: cdExpense.notes
-                )
-                
-                do {
-                    let firebaseId = try await firebaseService.createExpense(expense)
-                    await updateFirebaseId(for: expense.id, firebaseId: firebaseId)
-                    print("✅ DataManager: Synced pending expense: \(expense.title)")
-                } catch {
-                    print("❌ DataManager: Failed to sync pending expense: \(error)")
+        // Monitor Firebase auth state for sync availability
+        firebaseService.$isSignedIn
+            .sink { [weak self] isSignedIn in
+                print("🔐 DataManager: Auth state changed - isSignedIn: \(isSignedIn)")
+                if isSignedIn {
+                    Task {
+                        await self?.performBackgroundSync()
+                    }
                 }
             }
-        } catch {
-            print("❌ DataManager: Failed to fetch pending expenses: \(error)")
+            .store(in: &cancellables)
+        
+        // Authenticate if needed
+        if !firebaseService.isSignedIn {
+            Task {
+                await authenticateFirebase()
+            }
         }
     }
-    // MARK: - Core Data Operations
+    
+    // MARK: - Core Data Operations (Primary Data Source)
     private func loadLocalExpenses() {
-        print("💾 DataManager: Loading local expenses...")
+        print("💾 DataManager: Loading expenses from Core Data...")
         let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
         request.predicate = NSPredicate(format: "isRemoved == NO")
         request.sortDescriptors = [NSSortDescriptor(keyPath: \CDExpense.date, ascending: false)]
@@ -117,9 +88,9 @@ class DataManager: ObservableObject {
             let cdExpenses = try persistenceController.viewContext.fetch(request)
             print("💾 DataManager: Loaded \(cdExpenses.count) local expenses")
             
-            // Convert CDExpense to Expense (simplified for now)
+            // Convert to Expense objects
             self.expenses = cdExpenses.map { cdExpense in
-                Expense(
+                var expense = Expense(
                     id: cdExpense.wrappedId,
                     title: cdExpense.wrappedTitle,
                     amount: cdExpense.amount,
@@ -127,76 +98,67 @@ class DataManager: ObservableObject {
                     date: cdExpense.wrappedDate,
                     notes: cdExpense.notes
                 )
+                
+                // Add lent money properties if Core Data supports them
+                if let cdExpense = cdExpense as? CDExpense {
+                    expense.isLentMoney = cdExpense.value(forKey: "isLentMoney") as? Bool ?? false
+                    expense.lentToPersonName = cdExpense.value(forKey: "lentToPersonName") as? String
+                    expense.isRepaid = cdExpense.value(forKey: "isRepaid") as? Bool ?? false
+                    expense.repaidDate = cdExpense.value(forKey: "repaidDate") as? Date
+                }
+                
+                return expense
             }
+            
+            // Update pending changes status after loading
+            updatePendingChangesStatus()
+            
             print("✅ DataManager: Local expenses loaded successfully")
         } catch {
             print("❌ DataManager: Failed to load local expenses: \(error)")
-            self.errorMessage = "Failed to load local expenses: \(error.localizedDescription)"
+            self.errorMessage = "Failed to load expenses: \(error.localizedDescription)"
         }
     }
     
-    // MARK: - CRUD Operations with Debug Logging
+    // MARK: - CRUD Operations (Core Data First)
     func addExpense(_ expense: Expense) async {
-        print("➕ DataManager: Adding expense: \(expense.title) - $\(expense.amount)")
+        print("➕ DataManager: Adding expense: \(expense.title)")
         
-        // Save locally first
-        await saveExpenseLocally(expense)
+        // 1. Save to Core Data first (immediate UI update)
+        await saveExpenseLocally(expense, needsSync: true)
         
-        // Sync to Firebase
-        if firebaseService.isSignedIn {
-            print("🔥 DataManager: Syncing to Firebase...")
-            do {
-                let firebaseId = try await firebaseService.createExpense(expense)
-                print("✅ DataManager: Firebase sync successful, ID: \(firebaseId)")
-                await updateFirebaseId(for: expense.id, firebaseId: firebaseId)
-            } catch {
-                print("❌ DataManager: Firebase sync failed: \(error)")
-                await markExpenseForSync(expense.id)
-            }
-        } else {
-            print("⚠️ DataManager: Not signed in to Firebase, marking for later sync")
-            await markExpenseForSync(expense.id)
+        // 2. Background sync to Firebase
+        Task {
+            await syncExpenseToFirebase(expense)
         }
     }
     
     func updateExpense(_ expense: Expense) async {
         print("✏️ DataManager: Updating expense: \(expense.title)")
-        await updateExpenseLocally(expense)
         
-        if firebaseService.isSignedIn {
-            if let cdExpense = await fetchCDExpense(by: expense.id),
-               let firebaseId = cdExpense.firebaseId {
-                do {
-                    try await firebaseService.updateExpense(expense, firebaseId: firebaseId)
-                    print("✅ DataManager: Firebase update successful")
-                } catch {
-                    print("❌ DataManager: Firebase update failed: \(error)")
-                    await markExpenseForSync(expense.id)
-                }
-            }
+        // 1. Update Core Data first
+        await updateExpenseLocally(expense, needsSync: true)
+        
+        // 2. Background sync to Firebase
+        Task {
+            await syncExpenseToFirebase(expense)
         }
     }
     
     func deleteExpense(_ expense: Expense) async {
         print("🗑️ DataManager: Deleting expense: \(expense.title)")
-        await deleteExpenseLocally(expense.id)
         
-        if firebaseService.isSignedIn {
-            if let cdExpense = await fetchCDExpense(by: expense.id),
-               let firebaseId = cdExpense.firebaseId {
-                do {
-                    try await firebaseService.deleteExpense(firebaseId: firebaseId)
-                    print("✅ DataManager: Firebase delete successful")
-                } catch {
-                    print("❌ DataManager: Firebase delete failed: \(error)")
-                }
-            }
+        // 1. Mark as removed in Core Data
+        await deleteExpenseLocally(expense.id, needsSync: true)
+        
+        // 2. Background sync to Firebase
+        Task {
+            await syncExpenseDeletionToFirebase(expense)
         }
     }
     
-    // MARK: - Private Core Data Helpers
-    private func saveExpenseLocally(_ expense: Expense) async {
-        print("💾 DataManager: Saving expense locally: \(expense.title)")
+    // MARK: - Core Data Helpers
+    private func saveExpenseLocally(_ expense: Expense, needsSync: Bool = false) async {
         let context = persistenceController.viewContext
         
         let cdExpense = CDExpense(context: context)
@@ -208,24 +170,23 @@ class DataManager: ObservableObject {
         cdExpense.notes = expense.notes
         cdExpense.createdAt = Date()
         cdExpense.updatedAt = Date()
-        cdExpense.needsSync = true
+        cdExpense.needsSync = needsSync
         cdExpense.isRemoved = false
         
-        // Handle new fields safely
-        if expense.isLentMoney {
-            cdExpense.isLentMoney = expense.isLentMoney
-            cdExpense.lentToPersonName = expense.lentToPersonName
-        }
+        // Set lent money properties safely
+        cdExpense.setValue(expense.isLentMoney, forKey: "isLentMoney")
+        cdExpense.setValue(expense.lentToPersonName, forKey: "lentToPersonName")
+        cdExpense.setValue(expense.isRepaid, forKey: "isRepaid")
+        cdExpense.setValue(expense.repaidDate, forKey: "repaidDate")
         
         persistenceController.save()
         
-        await MainActor.run {
-            loadLocalExpenses()
-        }
-        print("✅ DataManager: Local save completed")
+        // Reload UI and update status
+        loadLocalExpenses()
+        print("✅ DataManager: Expense saved locally")
     }
     
-    private func updateExpenseLocally(_ expense: Expense) async {
+    private func updateExpenseLocally(_ expense: Expense, needsSync: Bool = false) async {
         guard let cdExpense = await fetchCDExpense(by: expense.id) else {
             print("❌ DataManager: Could not find expense to update")
             return
@@ -237,25 +198,29 @@ class DataManager: ObservableObject {
         cdExpense.date = expense.date
         cdExpense.notes = expense.notes
         cdExpense.updatedAt = Date()
-        cdExpense.needsSync = true
+        cdExpense.needsSync = needsSync
+        
+        // Update lent money properties safely
+        cdExpense.setValue(expense.isLentMoney, forKey: "isLentMoney")
+        cdExpense.setValue(expense.lentToPersonName, forKey: "lentToPersonName")
+        cdExpense.setValue(expense.isRepaid, forKey: "isRepaid")
+        cdExpense.setValue(expense.repaidDate, forKey: "repaidDate")
         
         persistenceController.save()
-        
-        await MainActor.run {
-            loadLocalExpenses()
-        }
+        loadLocalExpenses()
+        print("✅ DataManager: Expense updated locally")
     }
     
-    private func deleteExpenseLocally(_ expenseId: UUID) async {
+    private func deleteExpenseLocally(_ expenseId: UUID, needsSync: Bool = false) async {
         guard let cdExpense = await fetchCDExpense(by: expenseId) else { return }
         
         cdExpense.isRemoved = true
         cdExpense.updatedAt = Date()
+        cdExpense.needsSync = needsSync
         
         persistenceController.save()
-        await MainActor.run {
-            loadLocalExpenses()
-        }
+        loadLocalExpenses()
+        print("✅ DataManager: Expense marked as removed locally")
     }
     
     private func fetchCDExpense(by id: UUID) async -> CDExpense? {
@@ -267,190 +232,236 @@ class DataManager: ObservableObject {
         return try? context.fetch(request).first
     }
     
+    // MARK: - Pending Changes Status Update
+    private func updatePendingChangesStatus() {
+        let context = persistenceController.viewContext
+        let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
+        request.predicate = NSPredicate(format: "needsSync == YES")
+        
+        do {
+            let count = try context.count(for: request)
+            self.hasPendingChanges = count > 0
+        } catch {
+            self.hasPendingChanges = false
+            print("❌ DataManager: Failed to check pending changes: \(error)")
+        }
+    }
+    
+    // MARK: - Firebase Sync Operations
+    private func authenticateFirebase() async {
+        print("🔐 DataManager: Authenticating with Firebase...")
+        do {
+            try await firebaseService.signInAnonymously()
+            print("✅ DataManager: Firebase authentication successful")
+        } catch {
+            print("❌ DataManager: Firebase authentication failed: \(error)")
+        }
+    }
+    
+    func performManualSync() async {
+        print("🔄 DataManager: Manual sync requested")
+        await performBackgroundSync()
+    }
+    
+    private func performBackgroundSync() async {
+        guard firebaseService.isSignedIn else {
+            print("⚠️ DataManager: Cannot sync - not authenticated")
+            return
+        }
+        
+        await MainActor.run {
+            self.syncStatus = .syncing
+        }
+        
+        print("🔄 DataManager: Starting background sync...")
+        
+        do {
+            // 1. Upload unsynced local changes to Firebase
+            await uploadPendingChanges()
+            
+            // 2. Download new/updated expenses from Firebase
+            await downloadFirebaseChanges()
+            
+            await MainActor.run {
+                self.syncStatus = .success
+                self.lastSyncDate = Date() // Update @Published property
+            }
+            
+            print("✅ DataManager: Background sync completed")
+        } catch {
+            print("❌ DataManager: Background sync failed: \(error)")
+            await MainActor.run {
+                self.syncStatus = .error(error.localizedDescription)
+            }
+        }
+    }
+    
+    private func uploadPendingChanges() async {
+        print("📤 DataManager: Uploading pending changes...")
+        
+        let context = persistenceController.viewContext
+        let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
+        request.predicate = NSPredicate(format: "needsSync == YES")
+        
+        do {
+            let pendingExpenses = try context.fetch(request)
+            print("📤 DataManager: Found \(pendingExpenses.count) pending changes")
+            
+            for cdExpense in pendingExpenses {
+                if cdExpense.isRemoved {
+                    // Upload deletion
+                    await syncExpenseDeletionToFirebase(cdExpense)
+                } else {
+                    // Upload create/update
+                    let expense = convertCDExpenseToExpense(cdExpense)
+                    await syncExpenseToFirebase(expense)
+                }
+                
+                // Mark as synced
+                cdExpense.needsSync = false
+                cdExpense.lastSyncedAt = Date()
+            }
+            
+            persistenceController.save()
+            
+            // Update pending changes status
+            updatePendingChangesStatus()
+            
+            print("✅ DataManager: Pending changes uploaded")
+        } catch {
+            print("❌ DataManager: Failed to upload pending changes: \(error)")
+        }
+    }
+    
+    private func downloadFirebaseChanges() async {
+        print("📥 DataManager: Downloading Firebase changes...")
+        
+        do {
+            let firebaseExpenses = try await firebaseService.fetchAllExpenses()
+            print("📥 DataManager: Downloaded \(firebaseExpenses.count) expenses from Firebase")
+            
+            // Merge with local data using UUID deduplication
+            for firebaseExpense in firebaseExpenses {
+                await mergeFirebaseExpense(firebaseExpense)
+            }
+            
+            // Reload UI after merge
+            loadLocalExpenses()
+            print("✅ DataManager: Firebase changes merged")
+        } catch {
+            print("❌ DataManager: Failed to download Firebase changes: \(error)")
+            
+        }
+    }
+    
+    private func mergeFirebaseExpense(_ firebaseExpense: FirebaseExpense) async {
+        let expenseId = UUID(uuidString: firebaseExpense.id) ?? UUID()
+        let existingCDExpense = await fetchCDExpense(by: expenseId)
+        
+        if let existing = existingCDExpense {
+            // Check if Firebase version is newer
+            if let firebaseUpdated = firebaseExpense.updatedAt?.dateValue(),
+               let localUpdated = existing.updatedAt,
+               firebaseUpdated > localUpdated {
+                
+                print("🔄 DataManager: Updating local expense with newer Firebase version: \(firebaseExpense.title)")
+                let expense = firebaseExpense.toExpense()
+                await updateExpenseLocally(expense, needsSync: false)
+            } else {
+                print("⏩ DataManager: Local version is newer or same, skipping: \(firebaseExpense.title)")
+            }
+        } else {
+            // New expense from Firebase
+            print("➕ DataManager: Adding new expense from Firebase: \(firebaseExpense.title)")
+            let expense = firebaseExpense.toExpense()
+            await saveExpenseLocally(expense, needsSync: false)
+        }
+    }
+    
+    private func syncExpenseToFirebase(_ expense: Expense) async {
+        guard firebaseService.isSignedIn else { return }
+        
+        do {
+            if let cdExpense = await fetchCDExpense(by: expense.id),
+               let firebaseId = cdExpense.firebaseId {
+                // Update existing
+                try await firebaseService.updateExpense(expense, firebaseId: firebaseId)
+                print("✅ DataManager: Updated expense in Firebase: \(expense.title)")
+            } else {
+                // Create new
+                let firebaseId = try await firebaseService.createExpense(expense)
+                await updateFirebaseId(for: expense.id, firebaseId: firebaseId)
+                print("✅ DataManager: Created expense in Firebase: \(expense.title)")
+            }
+        } catch {
+            print("❌ DataManager: Failed to sync expense to Firebase: \(error)")
+        }
+    }
+    
+    private func syncExpenseDeletionToFirebase(_ expense: Expense) async {
+        guard firebaseService.isSignedIn else { return }
+        
+        if let cdExpense = await fetchCDExpense(by: expense.id),
+           let firebaseId = cdExpense.firebaseId {
+            do {
+                try await firebaseService.deleteExpense(firebaseId: firebaseId)
+                print("✅ DataManager: Deleted expense from Firebase: \(expense.title)")
+            } catch {
+                print("❌ DataManager: Failed to delete expense from Firebase: \(error)")
+            }
+        }
+    }
+    
+    private func syncExpenseDeletionToFirebase(_ cdExpense: CDExpense) async {
+        guard firebaseService.isSignedIn,
+              let firebaseId = cdExpense.firebaseId else { return }
+        
+        do {
+            try await firebaseService.deleteExpense(firebaseId: firebaseId)
+            print("✅ DataManager: Deleted expense from Firebase: \(cdExpense.wrappedTitle)")
+        } catch {
+            print("❌ DataManager: Failed to delete expense from Firebase: \(error)")
+        }
+    }
+    
     private func updateFirebaseId(for expenseId: UUID, firebaseId: String) async {
         guard let cdExpense = await fetchCDExpense(by: expenseId) else { return }
         
         cdExpense.firebaseId = firebaseId
         cdExpense.needsSync = false
         cdExpense.lastSyncedAt = Date()
-        
         persistenceController.save()
+        
+        // Update pending changes status
+        updatePendingChangesStatus()
     }
     
-    private func markExpenseForSync(_ expenseId: UUID) async {
-        guard let cdExpense = await fetchCDExpense(by: expenseId) else { return }
+    // MARK: - Helper Methods
+    private func convertCDExpenseToExpense(_ cdExpense: CDExpense) -> Expense {
+        var expense = Expense(
+            id: cdExpense.wrappedId,
+            title: cdExpense.wrappedTitle,
+            amount: cdExpense.amount,
+            category: cdExpense.expenseCategory,
+            date: cdExpense.wrappedDate,
+            notes: cdExpense.notes
+        )
         
-        cdExpense.needsSync = true
-        persistenceController.save()
+        // Add lent money properties safely
+        expense.isLentMoney = cdExpense.value(forKey: "isLentMoney") as? Bool ?? false
+        expense.lentToPersonName = cdExpense.value(forKey: "lentToPersonName") as? String
+        expense.isRepaid = cdExpense.value(forKey: "isRepaid") as? Bool ?? false
+        expense.repaidDate = cdExpense.value(forKey: "repaidDate") as? Date
+        
+        return expense
     }
     
-    // MARK: - Firebase Integration
-    private func setupFirebaseListener() {
-        // Remove existing listener to prevent duplicates
-        firebaseListener?.remove()
-        
-        print("👂 DataManager: Setting up Firebase listener...")
-        firebaseListener = firebaseService.listenToExpenses { [weak self] firebaseExpenses in
-            print("🔥 DataManager: Received \(firebaseExpenses.count) expenses from Firebase")
-            Task { @MainActor in
-                await self?.handleFirebaseExpenses(firebaseExpenses)
-            }
-        }
-    }
-    
-    private func handleFirebaseExpenses(_ firebaseExpenses: [FirebaseExpense]) async {
-        print("🔄 DataManager: Processing Firebase expenses...")
-        
-        // Convert Firebase expenses to Expense objects
-        var updatedExpenses: [Expense] = []
-        
-        for firebaseExpense in firebaseExpenses {
-            print("📄 Firebase expense: \(firebaseExpense.title) - isLentMoney: \(firebaseExpense.isLentMoney)")
-            
-            let convertedExpense = firebaseExpense.toExpense()
-            print("📄 Converted expense: \(convertedExpense.title) - isLentMoney: \(convertedExpense.isLentMoney)")
-            
-            updatedExpenses.append(convertedExpense)
-        }
-        
-        // Update the published expenses array immediately
-        await MainActor.run {
-            self.expenses = updatedExpenses.sorted { $0.date > $1.date }
-            print("🔄 DataManager: Updated expenses array with \(self.expenses.count) expenses")
-            
-            // Debug: Check if the lent money expense is in the array
-            for expense in self.expenses {
-                if expense.isLentMoney {
-                    print("✅ Found lent money expense in array: \(expense.title) - lentTo: \(expense.lentToPersonName ?? "nil")")
-                }
-            }
-        }
-        
-        // Also update Core Data in the background (optional)
-        await updateCoreDataFromFirebase(updatedExpenses)
-    }
-
-    // Helper method to update Core Data
-    private func updateCoreDataFromFirebase(_ expenses: [Expense]) async {
-        let context = persistenceController.viewContext
-        
-        for expense in expenses {
-            // Check if expense already exists in Core Data
-            let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
-            request.predicate = NSPredicate(format: "id == %@", expense.id as CVarArg)
-            request.fetchLimit = 1
-            
-            do {
-                let existingExpenses = try context.fetch(request)
-                
-                if let existingExpense = existingExpenses.first {
-                    // Update existing expense
-                    existingExpense.updateFromExpense(expense)
-                } else {
-                    // Create new expense
-                    let newCDExpense = CDExpense(context: context)
-                    newCDExpense.updateFromExpense(expense)
-                    newCDExpense.createdAt = Date()
-                    newCDExpense.needsSync = false
-                }
-            } catch {
-                print("❌ Error updating Core Data: \(error)")
-            }
-        }
-        
-        // Save Core Data changes
-        persistenceController.save()
-        print("💾 DataManager: Updated Core Data with Firebase expenses")
-    }
-    
-    private func performInitialSync() async {
-        print("🔄 DataManager: Performing initial Firebase sync...")
-        do {
-            let firebaseExpenses = try await firebaseService.fetchAllExpenses()
-            print("✅ DataManager: Initial sync completed, received \(firebaseExpenses.count) expenses")
-            
-            // Remove this line - the listener will handle the data
-            // await handleFirebaseExpenses(firebaseExpenses)
-            
-            await syncPendingExpenses()
-        } catch {
-            print("❌ DataManager: Initial sync failed: \(error)")
-        }
-    }
-    
-    private func syncPendingExpenses() async {
-        print("🔄 DataManager: Syncing pending expenses...")
-        let context = persistenceController.viewContext
-        let request: NSFetchRequest<CDExpense> = CDExpense.fetchRequest()
-        request.predicate = NSPredicate(format: "needsSync == YES AND isRemoved == NO")
-        
-        do {
-            let pendingExpenses = try context.fetch(request)
-            print("📋 DataManager: Found \(pendingExpenses.count) pending expenses to sync")
-            
-            for cdExpense in pendingExpenses {
-                let expense = Expense(
-                    id: cdExpense.wrappedId,
-                    title: cdExpense.wrappedTitle,
-                    amount: cdExpense.amount,
-                    category: cdExpense.expenseCategory,
-                    date: cdExpense.wrappedDate,
-                    notes: cdExpense.notes
-                )
-                
-                do {
-                    let firebaseId = try await firebaseService.createExpense(expense)
-                    await updateFirebaseId(for: expense.id, firebaseId: firebaseId)
-                    print("✅ DataManager: Synced pending expense: \(expense.title)")
-                } catch {
-                    print("❌ DataManager: Failed to sync pending expense: \(error)")
-                }
-            }
-        } catch {
-            print("❌ DataManager: Failed to fetch pending expenses: \(error)")
-        }
-    }
-    
-    // MARK: - Computed Properties
+    // MARK: - Public Interface
     var totalExpenses: Double {
         expenses.reduce(0) { $0 + $1.amount }
     }
     
     func expensesForCategory(_ category: ExpenseCategory) -> [Expense] {
         expenses.filter { $0.category == category }
-    }
-}
-
-
-extension DataManager {
-    func testFirebaseConnection() async {
-        print("🧪 Testing Firebase connection...")
-        
-        if !firebaseService.isSignedIn {
-            print("🔐 Not signed in, attempting sign in...")
-            do {
-                try await firebaseService.signInAnonymously()
-                print("✅ Sign in successful")
-            } catch {
-                print("❌ Sign in failed: \(error)")
-                return
-            }
-        }
-        
-        // Try to write a test document
-        let testExpense = Expense(
-            title: "Test Expense",
-            amount: 1.0,
-            category: .other,
-            date: Date(),
-            notes: "Test from app"
-        )
-        
-        do {
-            let firebaseId = try await firebaseService.createExpense(testExpense)
-            print("✅ Test expense created with ID: \(firebaseId)")
-        } catch {
-            print("❌ Test expense creation failed: \(error)")
-        }
     }
 }

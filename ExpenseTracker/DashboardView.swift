@@ -24,7 +24,7 @@ struct DashboardView: View {
                                     .font(.subheadline)
                                     .foregroundColor(ThemeColors.secondaryText)
                                 
-                                // Sync Status Indicator
+                                // Enhanced Sync Status Indicator
                                 HStack(spacing: 4) {
                                     Circle()
                                         .fill(syncStatusColor)
@@ -32,19 +32,33 @@ struct DashboardView: View {
                                     Text(expenseStore.syncStatus)
                                         .font(.caption)
                                         .foregroundColor(ThemeColors.secondaryText)
+                                    
+                                    if expenseStore.hasPendingChanges {
+                                        Text("• \(pendingChangesCount) pending")
+                                            .font(.caption)
+                                            .foregroundColor(ThemeColors.accent)
+                                    }
                                 }
                             }
                         }
                         Spacer()
                         
-                        // Profile Picture Placeholder
-                        Circle()
-                            .fill(ThemeColors.primaryGradient)
-                            .frame(width: 50, height: 50)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .foregroundColor(.white)
-                            )
+                        // Profile Picture Placeholder with sync info
+                        VStack {
+                            Circle()
+                                .fill(ThemeColors.primaryGradient)
+                                .frame(width: 50, height: 50)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .foregroundColor(.white)
+                                )
+                            
+                            if let lastSync = expenseStore.lastSyncDate {
+                                Text("Last sync: \(lastSyncFormatted(lastSync))")
+                                    .font(.caption2)
+                                    .foregroundColor(ThemeColors.secondaryText)
+                            }
+                        }
                     }
                     .padding(.horizontal)
                     
@@ -76,17 +90,16 @@ struct DashboardView: View {
                             value: formatCurrency(monthlyTotal),
                             icon: "calendar",
                             color: ThemeColors.accent
-                        ).frame(height: 100)
+                        )
                         
                         StatCardView(
                             title: "Categories",
                             value: "\(activeCategories)",
                             icon: "tag.fill",
                             color: ThemeColors.success
-                        ).frame(height: 100)
+                        )
                     }
                     .padding(.horizontal)
-                    
                     
                     // Recent Expenses
                     VStack(alignment: .leading, spacing: 12) {
@@ -152,6 +165,17 @@ struct DashboardView: View {
             return ThemeColors.secondaryText
         }
     }
+    
+    private var pendingChangesCount: Int {
+        // This would need to be implemented in ExpenseStore/DataManager
+        return expenseStore.hasPendingChanges ? 1 : 0
+    }
+    
+    private func lastSyncFormatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
 }
 
 // MARK: - Helper Views
@@ -190,6 +214,7 @@ struct StatCardView: View {
         .cornerRadius(12)
     }
 }
+
 #Preview {
     StatCardView(title: "This Month", value: "1", icon: "calendar", color: ThemeColors.accent)
         .frame(width: 150, height: 100)
