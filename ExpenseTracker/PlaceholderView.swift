@@ -15,14 +15,14 @@ import SwiftUI
 //    }
 //}
 
-struct AnalyticsView: View {
-    var body: some View {
-        NavigationView {
-            Text("Analytics View")
-                .navigationTitle("Analytics")
-        }
-    }
-}
+//struct AnalyticsView: View {
+//    var body: some View {
+//        NavigationView {
+//            Text("Analytics View")
+//                .navigationTitle("Analytics")
+//        }
+//    }
+//}
 
 struct SettingsView: View {
     var body: some View {

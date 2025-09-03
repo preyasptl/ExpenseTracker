@@ -20,7 +20,7 @@ struct DashboardView: View {
                                 .font(.title2)
                                 .foregroundColor(ThemeColors.text)
                             HStack {
-                                Text("Here's your expense overview")
+                                Text("Your expense overview")
                                     .font(.subheadline)
                                     .foregroundColor(ThemeColors.secondaryText)
                                 
@@ -62,28 +62,28 @@ struct DashboardView: View {
                     }
                     .padding(.horizontal)
                     
-                    // Total Expense Card
-                    VStack(spacing: 16) {
-                        HStack {
-                            Text("Total Expenses")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            Spacer()
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .foregroundColor(.white)
-                        }
-                        
-                        Text(formatCurrency(expenseStore.totalExpenses))
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                    }
-                    .padding()
-                    .background(ThemeColors.primaryGradient)
-                    .cornerRadius(16)
-                    .padding(.horizontal)
+//                    // Total Expense Card
+//                    VStack(spacing: 16) {
+//                        HStack {
+//                            Text("Total Expenses")
+//                                .font(.headline)
+//                                .foregroundColor(.white)
+//                            Spacer()
+//                            Image(systemName: "chart.line.uptrend.xyaxis")
+//                                .foregroundColor(.white)
+//                        }
+//                        
+//                        Text(formatCurrency(expenseStore.totalExpenses))
+//                            .font(.largeTitle)
+//                            .fontWeight(.bold)
+//                            .foregroundColor(.white)
+//                    }
+//                    .padding()
+//                    .background(ThemeColors.primaryGradient)
+//                    .cornerRadius(16)
+//                    .padding(.horizontal)
                     
-                    // Quick Stats
+                    // Quick Stats - Updated Summary Cards
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 16) {
                         StatCardView(
                             title: "This Month",
@@ -93,9 +93,9 @@ struct DashboardView: View {
                         )
                         
                         StatCardView(
-                            title: "Categories",
-                            value: "\(activeCategories)",
-                            icon: "tag.fill",
+                            title: "Total",
+                            value: formatCurrency(expenseStore.totalExpenses),
+                            icon: "chart.bar.fill",
                             color: ThemeColors.success
                         )
                     }
@@ -117,6 +117,7 @@ struct DashboardView: View {
                         
                         ForEach(recentExpenses.prefix(3)) { expense in
                             ExpenseRowView(expense: expense)
+                                .padding(.horizontal)
                         }
                     }
                 }

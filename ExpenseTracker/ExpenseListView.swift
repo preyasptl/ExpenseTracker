@@ -93,7 +93,25 @@ struct ExpenseListView: View {
                     
                     // Summary Cards
                     if !filteredExpenses.isEmpty {
-                        summarySection
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 16) {
+                            SummaryCard(
+                                title: "Total",
+                                amount: totalFilteredAmount,
+                                icon: "dollarsign.circle.fill",
+                                color: ThemeColors.primary
+                            )
+                            
+                            if outstandingLentAmount > 0 {
+                                SummaryCard(
+                                    title: "Outstanding",
+                                    amount: outstandingLentAmount,
+                                    icon: "clock.fill",
+                                    color: ThemeColors.accent
+                                )
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom,10)
                     }
                     
                     // Expense List
@@ -235,7 +253,7 @@ struct ExpenseListView: View {
 //            )
         }
         .padding(.horizontal)
-        .padding(.bottom)
+//        .padding(.bottom)
     }
     
     // MARK: - Expenses List
@@ -244,7 +262,7 @@ struct ExpenseListView: View {
             ForEach(groupedExpenses, id: \.key) { group in
                 Section(header: sectionHeader(for: group.key)) {
                     ForEach(group.value) { expense in
-                        ExpenseListRowView(expense: expense)
+                        ExpenseRowView(expense: expense)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedExpense = expense
@@ -416,90 +434,6 @@ struct ExpenseListView: View {
     }
 }
 
-// MARK: - Enhanced Expense List Row
-struct ExpenseListRowView: View {
-    let expense: Expense
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            // Category Icon
-            ZStack {
-                Circle()
-                    .fill(expense.category.color.opacity(0.2))
-                    .frame(width: 50, height: 50)
-                
-                Image(systemName: expense.category.icon)
-                    .font(.title3)
-                    .foregroundColor(expense.category.color)
-            }
-            
-            // Expense Details
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(expense.title)
-                        .font(.headline)
-                        .foregroundColor(ThemeColors.text)
-                    
-                    Spacer()
-                    
-                    // Amount
-                    Text(expense.formattedAmount)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(ThemeColors.text)
-                }
-                
-                HStack {
-                    // Category and Date
-                    Text(expense.category.rawValue)
-                        .font(.caption)
-                        .foregroundColor(ThemeColors.secondaryText)
-                    
-                    Text("•")
-                        .font(.caption)
-                        .foregroundColor(ThemeColors.secondaryText)
-                    
-                    Text(expense.formattedDate)
-                        .font(.caption)
-                        .foregroundColor(ThemeColors.secondaryText)
-                    
-                    Spacer()
-                    
-                    // Lent Money Status
-                    if expense.isLentMoney {
-                        HStack(spacing: 4) {
-                            Image(systemName: expense.isRepaid ? "checkmark.circle.fill" : "clock.fill")
-                                .font(.caption)
-                                .foregroundColor(expense.isRepaid ? ThemeColors.success : ThemeColors.accent)
-                            
-                            if let personName = expense.lentToPersonName {
-                                Text(personName)
-                                    .font(.caption)
-                                    .foregroundColor(ThemeColors.secondaryText)
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(
-                            (expense.isRepaid ? ThemeColors.success : ThemeColors.accent)
-                                .opacity(0.1)
-                        )
-                        .cornerRadius(8)
-                    }
-                }
-                
-                // Notes
-                if let notes = expense.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(.caption)
-                        .foregroundColor(ThemeColors.secondaryText)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
 
 // MARK: - Filter Chip
 struct FilterChip: View {
@@ -538,19 +472,21 @@ struct SummaryCard: View {
             HStack {
                 Image(systemName: icon)
                     .foregroundColor(color)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundColor(ThemeColors.secondaryText)
                 Spacer()
             }
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(ThemeColors.secondaryText)
-                
                 if let amount = amount {
                     Text(formatCurrency(amount))
                         .font(.title)
                         .fontWeight(.bold)
                         .foregroundColor(ThemeColors.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.2)
+                        .frame(minHeight: 34)
                 } else if let count = count {
                     Text("\(count)")
                         .font(.title)
@@ -559,7 +495,7 @@ struct SummaryCard: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity,alignment: .leading)
         .padding()
         .background(ThemeColors.cardBackground)
         .cornerRadius(12)
@@ -758,4 +694,13 @@ extension Calendar {
 #Preview {
     ExpenseListView()
         .environmentObject(ExpenseStore())
+}
+
+#Preview{
+    SummaryCard(
+        title: "Total",
+        amount: 12999.0,
+        icon: "indianrupeesign.circle.fill",
+        color: ThemeColors.primary
+    ).frame(width: 170)
 }
