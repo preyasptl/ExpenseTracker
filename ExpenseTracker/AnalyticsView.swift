@@ -212,6 +212,7 @@ struct AnalyticsView: View {
     }
     
     // MARK: - Lent Money Chart
+    // MARK: - Lent Money Chart
     private var lentMoneyChart: some View {
         Chart(lentMoneyData, id: \.person) { item in
             BarMark(
@@ -228,6 +229,17 @@ struct AnalyticsView: View {
                     if let amount = value.as(Double.self) {
                         Text(formatCurrencyShort(amount))
                             .font(.caption)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let person = value.as(String.self) {
+                        Text(person)
+                            .font(.caption)
+                            .lineLimit(1)
                     }
                 }
             }
@@ -426,15 +438,18 @@ struct AnalyticsView: View {
     }
     
     private func formatCurrencyShort(_ amount: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.locale = Locale.current
-        formatter.maximumFractionDigits = 0
-        
         if amount >= 1000 {
-            return formatter.string(from: NSNumber(value: amount / 1000)) ?? "$0" + "K"
+            let thousands = amount / 1000
+            if thousands >= 10 {
+                return "$\(Int(thousands))K"
+            } else {
+                return String(format: "$%.1fK", thousands)
+            }
+        } else if amount >= 100 {
+            return "$\(Int(amount))"
+        } else {
+            return "$\(Int(amount))"
         }
-        return formatter.string(from: NSNumber(value: amount)) ?? "$0"
     }
     
     private func daysBetween(start: Date, end: Date) -> Int {

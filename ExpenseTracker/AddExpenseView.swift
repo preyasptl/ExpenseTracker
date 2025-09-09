@@ -420,18 +420,3 @@ struct AddExpenseView: View {
         dismiss()
     }
 }
-
-
-// MARK: - Custom Text Field Style
-struct CustomTextFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .padding()
-            .background(ThemeColors.cardBackground)
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(ThemeColors.primary.opacity(0.2), lineWidth: 1)
-            )
-    }
-}

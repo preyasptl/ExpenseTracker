@@ -6,6 +6,7 @@
 //
 import SwiftUI
 
+
 struct AddPaymentModeView: View {
     let paymentModeStore: PaymentModeStore
     @Environment(\.dismiss) private var dismiss
