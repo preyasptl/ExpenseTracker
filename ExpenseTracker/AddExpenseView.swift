@@ -413,7 +413,7 @@ struct AddExpenseView: View {
             notes: notes.isEmpty ? nil : notes,
             isLentMoney: isLentMoney,
             lentToPersonName: isLentMoney ? lentToPersonName : nil,
-            paymentMode: PaymentMode.cash
+            paymentMode: selectedPaymentMode  // <- Fix this line
         )
         
         expenseStore.addExpense(expense)

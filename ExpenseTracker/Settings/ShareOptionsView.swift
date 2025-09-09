@@ -1,0 +1,247 @@
+//
+//  ShareOptionsView.swift
+//  ExpenseTracker
+//
+//  Created by iMacPro on 09/09/25.
+//
+import SwiftUI
+
+// MARK: - Alternative Share Options View
+struct ShareOptionsView: View {
+    let expenses: [Expense]
+    @Environment(\.dismiss) private var dismiss
+    @State private var shareType: ShareType = .summary
+    @State private var isSharing = false
+    
+    enum ShareType: String, CaseIterable {
+        case summary = "Text Summary"
+        case quickStats = "Quick Stats"
+        case categoryBreakdown = "Category Breakdown"
+        case lentMoneyReport = "Lent Money Report"
+        
+        var icon: String {
+            switch self {
+            case .summary: return "doc.text"
+            case .quickStats: return "chart.bar"
+            case .categoryBreakdown: return "tag"
+            case .lentMoneyReport: return "person.2"
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Header
+                VStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 50))
+                        .foregroundColor(ThemeColors.primary)
+                    
+                    Text("Share Expenses")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Text("Choose what to share")
+                        .font(.subheadline)
+                        .foregroundColor(ThemeColors.secondaryText)
+                }
+                .padding()
+                
+                // Share options
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 16) {
+                    ForEach(ShareType.allCases, id: \.self) { type in
+                        ShareOptionCard(
+                            type: type,
+                            isSelected: shareType == type
+                        ) {
+                            shareType = type
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+                
+                // Share button
+                Button(action: shareContent) {
+                    HStack {
+                        if isSharing {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "paperplane")
+                        }
+                        
+                        Text(isSharing ? "Generating..." : "Share \(shareType.rawValue)")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(ThemeColors.primaryGradient)
+                    .cornerRadius(12)
+                }
+                .disabled(isSharing)
+                .padding()
+            }
+            .navigationTitle("Share Options")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func shareContent() {
+        isSharing = true
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let content = generateContent(for: shareType)
+            
+            #if os(iOS)
+            presentShareSheet(with: content)
+            #else
+            copyToClipboard(content)
+            #endif
+            
+            isSharing = false
+            dismiss()
+        }
+    }
+    
+    private func generateContent(for type: ShareType) -> String {
+        switch type {
+        case .summary:
+            return generateFullSummary()
+        case .quickStats:
+            return generateQuickStats()
+        case .categoryBreakdown:
+            return generateCategoryBreakdown()
+        case .lentMoneyReport:
+            return generateLentMoneyReport()
+        }
+    }
+    
+    private func generateFullSummary() -> String {
+        // Use the same logic as the enhanced share function
+        return "Full summary implementation here..."
+    }
+    
+    private func generateQuickStats() -> String {
+        let total = expenses.reduce(0) { $0 + $1.amount }
+        let count = expenses.count
+        let avgAmount = count > 0 ? total / Double(count) : 0
+        
+        return """
+        💰 Quick Stats
+        
+        Total Expenses: \(count)
+        Total Amount: \(CurrencyManager.shared.formatCurrency(total))
+        Average per expense: \(CurrencyManager.shared.formatCurrency(avgAmount))
+        
+        Generated by ExpenseTracker
+        """
+    }
+    
+    private func generateCategoryBreakdown() -> String {
+        let categoryTotals = Dictionary(grouping: expenses) { $0.category }
+            .mapValues { expenses in expenses.reduce(0) { $0 + $1.amount } }
+            .sorted { $0.value > $1.value }
+        
+        let total = expenses.reduce(0) { $0 + $1.amount }
+        
+        var breakdown = "📂 Category Breakdown\n\n"
+        
+        for (index, category) in categoryTotals.enumerated() {
+            let percentage = total > 0 ? (category.value / total) * 100 : 0
+            breakdown += "\(index + 1). \(category.key.rawValue): \(CurrencyManager.shared.formatCurrency(category.value)) (\(Int(percentage))%)\n"
+        }
+        
+        breakdown += "\nGenerated by ExpenseTracker"
+        return breakdown
+    }
+    
+    private func generateLentMoneyReport() -> String {
+        let lentExpenses = expenses.filter { $0.isLentMoney }
+        
+        if lentExpenses.isEmpty {
+            return "💸 No lent money transactions found."
+        }
+        
+        let totalLent = lentExpenses.reduce(0) { $0 + $1.amount }
+        let outstanding = lentExpenses.filter { !$0.isRepaid }
+        let outstandingAmount = outstanding.reduce(0) { $0 + $1.amount }
+        
+        var report = """
+        💸 Lent Money Report
+        
+        Total Lent: \(CurrencyManager.shared.formatCurrency(totalLent))
+        Outstanding: \(CurrencyManager.shared.formatCurrency(outstandingAmount))
+        Repaid: \(CurrencyManager.shared.formatCurrency(totalLent - outstandingAmount))
+        
+        """
+        
+        if !outstanding.isEmpty {
+            report += "Outstanding Loans:\n"
+            for expense in outstanding.sorted { $0.amount > $1.amount } {
+                let person = expense.lentToPersonName ?? "Unknown"
+                report += "• \(person): \(CurrencyManager.shared.formatCurrency(expense.amount))\n"
+            }
+        }
+        
+        report += "\nGenerated by ExpenseTracker"
+        return report
+    }
+    
+    // Platform-specific sharing methods (same as above)
+    #if os(iOS)
+    private func presentShareSheet(with content: String) {
+        // Implementation same as above
+    }
+    #endif
+    
+    #if os(macOS)
+    private func copyToClipboard(_ content: String) {
+        // Implementation same as above
+    }
+    #endif
+}
+
+struct ShareOptionCard: View {
+    let type: ShareOptionsView.ShareType
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 12) {
+                Image(systemName: type.icon)
+                    .font(.title2)
+                    .foregroundColor(isSelected ? .white : ThemeColors.primary)
+                
+                Text(type.rawValue)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(isSelected ? .white : ThemeColors.text)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 100)
+            .background(
+                isSelected ? ThemeColors.primary : ThemeColors.cardBackground
+            )
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(ThemeColors.primary, lineWidth: isSelected ? 0 : 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}

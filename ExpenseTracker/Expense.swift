@@ -25,12 +25,16 @@ struct Expense: Identifiable, Codable {
     var repaidDate: Date?
     var paymentMode: PaymentMode = PaymentMode.cash
     
+//    var formattedAmount: String {
+//        let formatter = NumberFormatter()
+//        formatter.numberStyle = .currency
+//        formatter.locale = Locale.current
+//        return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
+//    }
+    
     var formattedAmount: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.locale = Locale.current
-        return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
-    }
+            return amount.formattedAsCurrency()
+        }
     
     var formattedDate: String {
         let formatter = DateFormatter()

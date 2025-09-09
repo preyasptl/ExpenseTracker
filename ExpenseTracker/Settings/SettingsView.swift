@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var selectedCurrency = "USD"
     @State private var showingSyncStatus = false
     
-    private let currencies = ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "INR", "CNY"]
+    private let currencies = Currency.allCurrencies
     
     var body: some View {
         NavigationView {
@@ -33,7 +33,7 @@ struct SettingsView: View {
                 exportSection
                 
                 // App Preferences Section
-                preferencesSection
+                functionalPreferencesSection
                 
                 // About Section
                 aboutSection
@@ -211,44 +211,43 @@ struct SettingsView: View {
     }
     
     // MARK: - Preferences Section
-    private var preferencesSection: some View {
-        Section("Preferences") {
-            // Currency Selection
-            HStack {
-                Image(systemName: "dollarsign.circle")
-                    .foregroundColor(ThemeColors.primary)
-                Text("Currency")
-                Spacer()
-                Picker("Currency", selection: $selectedCurrency) {
-                    ForEach(currencies, id: \.self) { currency in
-                        Text(currency).tag(currency)
-                    }
-                }
-                .pickerStyle(MenuPickerStyle())
-            }
-            
-            // Notifications (placeholder)
-            HStack {
-                Image(systemName: "bell")
-                    .foregroundColor(ThemeColors.accent)
-                Text("Notifications")
-                Spacer()
-                Toggle("", isOn: .constant(false))
-                    .disabled(true) // Placeholder
-            }
-            
-            // Theme (placeholder)
-            HStack {
-                Image(systemName: "paintbrush")
-                    .foregroundColor(ThemeColors.success)
-                Text("Theme")
-                Spacer()
-                Text("System")
-                    .foregroundColor(ThemeColors.secondaryText)
-                    .font(.subheadline)
-            }
-        }
-    }
+    var functionalPreferencesSection: some View {
+           Section("Preferences") {
+               // Currency Selection - Now Functional
+               NavigationLink(destination: CurrencySelectionView()) {
+                   HStack {
+                       Image(systemName: "dollarsign.circle")
+                           .foregroundColor(ThemeColors.primary)
+                       Text("Currency")
+                       Spacer()
+                       Text(CurrencyManager.shared.selectedCurrency.code)
+                           .foregroundColor(ThemeColors.secondaryText)
+                           .font(.subheadline)
+                   }
+               }
+               
+               // Notifications (placeholder)
+               HStack {
+                   Image(systemName: "bell")
+                       .foregroundColor(ThemeColors.accent)
+                   Text("Notifications")
+                   Spacer()
+                   Toggle("", isOn: .constant(false))
+                       .disabled(true) // Placeholder
+               }
+               
+               // Theme (placeholder)
+               HStack {
+                   Image(systemName: "paintbrush")
+                       .foregroundColor(ThemeColors.success)
+                   Text("Theme")
+                   Spacer()
+                   Text("System")
+                       .foregroundColor(ThemeColors.secondaryText)
+                       .font(.subheadline)
+               }
+           }
+       }
     
     // MARK: - About Section
     private var aboutSection: some View {
@@ -304,12 +303,7 @@ struct SettingsView: View {
     private func performManualSync() {
         expenseStore.performManualSync()
     }
-    
-    private func shareAppData() {
-        // Implement share functionality
-        print("Sharing app data...")
-    }
-    
+        
     private func openPrivacyPolicy() {
         // Open privacy policy URL
         print("Opening privacy policy...")
@@ -326,4 +320,264 @@ struct SettingsView: View {
         formatter.locale = Locale.current
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
+}
+
+struct CurrencySelectionView: View {
+    @StateObject private var currencyManager = CurrencyManager.shared
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        List {
+            Section {
+                ForEach(Currency.allCurrencies) { currency in
+                    Button(action: {
+                        currencyManager.selectedCurrency = currency
+                    }) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(currency.name)
+                                    .font(.subheadline)
+                                    .foregroundColor(ThemeColors.text)
+                                
+                                Text("\(currency.code) • \(currency.symbol)")
+                                    .font(.caption)
+                                    .foregroundColor(ThemeColors.secondaryText)
+                            }
+                            
+                            Spacer()
+                            
+                            // Sample amount formatting
+                            Text(currencyManager.formatCurrency(1234.56))
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(ThemeColors.primary)
+                            
+                            if currency.code == currencyManager.selectedCurrency.code {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(ThemeColors.primary)
+                                    .font(.headline)
+                            }
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            } header: {
+                Text("Select your preferred currency for displaying amounts throughout the app")
+                    .font(.caption)
+                    .foregroundColor(ThemeColors.secondaryText)
+            }
+        }
+        .navigationTitle("Currency")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Updated Currency Formatting Extensions
+extension Double {
+    func formattedAsCurrency() -> String {
+        return CurrencyManager.shared.formatCurrency(self)
+    }
+    
+    func formattedAsCurrencyShort() -> String {
+        return CurrencyManager.shared.formatCurrencyShort(self)
+    }
+}
+
+// MARK: - Update Expense Model Extension
+
+extension SettingsView {
+    func shareAppData() {
+        // Generate comprehensive expense summary
+        let summary = generateExpenseSummary()
+        
+        #if os(iOS)
+        presentShareSheet(with: summary)
+        #else
+        copyToClipboard(summary)
+        #endif
+    }
+    
+    private func generateExpenseSummary() -> String {
+        let expenses = expenseStore.expenses
+        let totalExpenses = expenses.count
+        let totalAmount = expenses.reduce(0) { $0 + $1.amount }
+        
+        // Lent money calculations
+        let lentExpenses = expenses.filter { $0.isLentMoney }
+        let lentAmount = lentExpenses.reduce(0) { $0 + $1.amount }
+        let outstandingExpenses = lentExpenses.filter { !$0.isRepaid }
+        let outstandingAmount = outstandingExpenses.reduce(0) { $0 + $1.amount }
+        let repaidAmount = lentAmount - outstandingAmount
+        
+        // Time period calculations
+        let calendar = Calendar.current
+        let now = Date()
+        
+        let thisMonthExpenses = expenses.filter { calendar.isDate($0.date, equalTo: now, toGranularity: .month) }
+        let thisMonthAmount = thisMonthExpenses.reduce(0) { $0 + $1.amount }
+        
+        let last30DaysExpenses = expenses.filter {
+            $0.date >= calendar.date(byAdding: .day, value: -30, to: now) ?? now
+        }
+        let last30DaysAmount = last30DaysExpenses.reduce(0) { $0 + $1.amount }
+        
+        // Category breakdown
+        let categoryTotals = Dictionary(grouping: expenses) { $0.category }
+            .mapValues { expenses in expenses.reduce(0) { $0 + $1.amount } }
+            .sorted { $0.value > $1.value }
+        
+        // Payment mode breakdown
+        let paymentTotals = Dictionary(grouping: expenses) { $0.paymentMode.name }
+            .mapValues { expenses in expenses.reduce(0) { $0 + $1.amount } }
+            .sorted { $0.value > $1.value }
+        
+        // Recent expenses (last 5)
+        let recentExpenses = expenses.sorted { $0.date > $1.date }.prefix(5)
+        
+        // Generate formatted summary
+        var summary = """
+        📊 My Expense Tracker Summary
+        Generated on \(DateFormatter.shared.string(from: now))
+        
+        💰 OVERALL SUMMARY
+        Total Expenses: \(totalExpenses) entries
+        Total Amount: \(formatCurrency(totalAmount))
+        Currency: \(CurrencyManager.shared.selectedCurrency.code)
+        
+        📅 TIME PERIODS
+        This Month: \(formatCurrency(thisMonthAmount)) (\(thisMonthExpenses.count) expenses)
+        Last 30 Days: \(formatCurrency(last30DaysAmount)) (\(last30DaysExpenses.count) expenses)
+        """
+        
+        // Add lent money section if applicable
+        if !lentExpenses.isEmpty {
+            summary += """
+            
+            💸 LENT MONEY TRACKING
+            Total Lent: \(formatCurrency(lentAmount)) (\(lentExpenses.count) transactions)
+            Repaid: \(formatCurrency(repaidAmount))
+            Outstanding: \(formatCurrency(outstandingAmount)) (\(outstandingExpenses.count) pending)
+            """
+            
+            // Outstanding details
+            if !outstandingExpenses.isEmpty {
+                summary += "\n\nOutstanding Loans:"
+                for expense in outstandingExpenses.sorted { $0.amount > $1.amount }.prefix(3) {
+                    let personName = expense.lentToPersonName ?? "Unknown"
+                    summary += "\n• \(personName): \(formatCurrency(expense.amount))"
+                }
+                if outstandingExpenses.count > 3 {
+                    summary += "\n• ... and \(outstandingExpenses.count - 3) more"
+                }
+            }
+        }
+        
+        // Top categories
+        summary += """
+        
+        📂 TOP SPENDING CATEGORIES
+        """
+        
+        for (index, category) in categoryTotals.prefix(5).enumerated() {
+            let percentage = (category.value / totalAmount) * 100
+            summary += "\n\(index + 1). \(category.key.rawValue): \(formatCurrency(category.value)) (\(Int(percentage))%)"
+        }
+        
+        // Payment methods
+        if paymentTotals.count > 1 {
+            summary += """
+            
+            💳 PAYMENT METHODS
+            """
+            
+            for (index, payment) in paymentTotals.prefix(3).enumerated() {
+                let percentage = (payment.value / totalAmount) * 100
+                summary += "\n\(index + 1). \(payment.key): \(formatCurrency(payment.value)) (\(Int(percentage))%)"
+            }
+        }
+        
+        // Recent activity
+        if !recentExpenses.isEmpty {
+            summary += """
+            
+            🕒 RECENT ACTIVITY
+            """
+            
+            for expense in recentExpenses {
+                let dateStr = DateFormatter.shortDate.string(from: expense.date)
+                let lentIndicator = expense.isLentMoney ? (expense.isRepaid ? "✅" : "⏳") : ""
+                summary += "\n• \(dateStr): \(expense.title) - \(formatCurrency(expense.amount)) \(lentIndicator)"
+            }
+        }
+        
+        // Average spending
+        let daysSinceFirstExpense = expenses.isEmpty ? 1 :
+            max(1, calendar.dateComponents([.day], from: expenses.map { $0.date }.min() ?? now, to: now).day ?? 1)
+        let averagePerDay = totalAmount / Double(daysSinceFirstExpense)
+        
+        summary += """
+        
+        📈 SPENDING INSIGHTS
+        Average per day: \(formatCurrency(averagePerDay))
+        Tracking period: \(daysSinceFirstExpense) days
+        Most expensive: \(expenses.max { $0.amount < $1.amount }?.title ?? "None") (\(formatCurrency(expenses.max { $0.amount < $1.amount }?.amount ?? 0)))
+        """
+        
+        summary += """
+        
+        Generated by ExpenseTracker App
+        """
+        
+        return summary
+    }
+    
+    #if os(iOS)
+    private func presentShareSheet(with content: String) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            return
+        }
+        
+        let activityViewController = UIActivityViewController(
+            activityItems: [content],
+            applicationActivities: nil
+        )
+        
+        // Configure for iPad
+        if let popover = activityViewController.popoverPresentationController {
+            popover.sourceView = window
+            popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        
+        rootViewController.present(activityViewController, animated: true)
+    }
+    #endif
+    
+    #if os(macOS)
+    private func copyToClipboard(_ content: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(content, forType: .string)
+        
+        // Could add a toast notification here to indicate copy success
+        print("Summary copied to clipboard")
+    }
+    #endif
+}
+
+extension DateFormatter {
+    static let shared: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+    
+    static let shortDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM dd"
+        return formatter
+    }()
 }
