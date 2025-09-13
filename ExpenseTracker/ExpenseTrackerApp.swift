@@ -11,6 +11,7 @@ import Firebase
 @main
 struct ExpenseTrackerApp: App {
     @StateObject private var expenseStore = ExpenseStore()
+    @StateObject private var themeManager = ThemeManager.shared
     @State private var showSplashScreen = true
     
     init() {
@@ -27,6 +28,7 @@ struct ExpenseTrackerApp: App {
                 } else {
                     ContentView()
                         .environmentObject(expenseStore)
+                        .environmentObject(themeManager)
                         .transition(.opacity)
                 }
             }

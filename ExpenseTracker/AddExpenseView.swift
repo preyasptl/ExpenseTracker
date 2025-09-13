@@ -12,7 +12,7 @@ struct AddExpenseView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @StateObject private var paymentModeStore = PaymentModeStore()
     @Environment(\.dismiss) private var dismiss
-    
+    @StateObject private var currencyManager = CurrencyManager.shared
     @State private var title = ""
     @State private var amount = ""
     @State private var selectedCategory = ExpenseCategory.food
@@ -42,7 +42,7 @@ struct AddExpenseView: View {
         if let value = Double(amount), value > 0 {
             let formatter = NumberFormatter()
             formatter.numberStyle = .currency
-            formatter.locale = Locale.current
+            formatter.locale = currencyManager.currentLocale
             return formatter.string(from: NSNumber(value: value)) ?? ""
         }
         return ""

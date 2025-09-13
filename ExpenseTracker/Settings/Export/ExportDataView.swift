@@ -18,6 +18,7 @@ struct ExportDataView: View {
     @State private var isExporting = false
     @State private var showingShareSheet = false
     @State private var exportedFileURL: URL?
+    @StateObject private var currencyManager = CurrencyManager.shared
     
     enum ExportFormat: String, CaseIterable {
         case csv = "CSV"
@@ -303,7 +304,7 @@ struct ExportDataView: View {
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.locale = Locale.current
+        formatter.locale = currencyManager.currentLocale
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
     

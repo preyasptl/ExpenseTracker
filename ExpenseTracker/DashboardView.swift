@@ -8,6 +8,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
+    @StateObject private var currencyManager = CurrencyManager.shared
     
     var body: some View {
         NavigationView {
@@ -109,7 +110,7 @@ struct DashboardView: View {
                                 .foregroundColor(ThemeColors.text)
                             Spacer()
                             Button("See All") {
-                                // Navigate to expenses tab
+                                
                             }
                             .foregroundColor(ThemeColors.primary)
                         }
@@ -150,7 +151,7 @@ struct DashboardView: View {
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.locale = Locale.current
+        formatter.locale = currencyManager.currentLocale
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
     

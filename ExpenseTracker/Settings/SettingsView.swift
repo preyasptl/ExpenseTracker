@@ -7,16 +7,22 @@
 
 
 import SwiftUI
+import MessageUI
 
 struct SettingsView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @StateObject private var paymentModeStore = PaymentModeStore()
     @State private var showingAddPaymentMode = false
     @State private var showingExportSheet = false
+    @State private var showingImportSheet = false
     @State private var showingDeleteConfirmation = false
     @State private var paymentModeToDelete: PaymentMode?
     @State private var selectedCurrency = "USD"
     @State private var showingSyncStatus = false
+    
+    @StateObject private var currencyManager = CurrencyManager.shared
+    @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var notificationManager = NotificationManager.shared
     
     private let currencies = Currency.allCurrencies
     
@@ -48,6 +54,9 @@ struct SettingsView: View {
             .sheet(isPresented: $showingSyncStatus) {
                 SyncStatusView()
                     .environmentObject(expenseStore)
+            }
+            .sheet(isPresented: $showingImportSheet) {
+                CSVImportView().environmentObject(expenseStore)
             }
             .alert("Delete Payment Mode", isPresented: $showingDeleteConfirmation) {
                 Button("Cancel", role: .cancel) { }
@@ -186,7 +195,7 @@ struct SettingsView: View {
     
     // MARK: - Export Section
     private var exportSection: some View {
-        Section("Export & Backup") {
+        Section("Data Management") {
             Button(action: { showingExportSheet = true }) {
                 HStack {
                     Image(systemName: "square.and.arrow.up")
@@ -199,11 +208,23 @@ struct SettingsView: View {
                 }
             }
             
+            Button(action: { showingImportSheet = true }) {
+                HStack {
+                    Image(systemName: "square.and.arrow.down")
+                        .foregroundColor(ThemeColors.primary)
+                    Text("Import from CSV")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(ThemeColors.secondaryText)
+                }
+            }
+            
             Button(action: shareAppData) {
                 HStack {
                     Image(systemName: "paperplane")
-                        .foregroundColor(ThemeColors.primary)
-                    Text("Share Expenses")
+                        .foregroundColor(ThemeColors.accent)
+                    Text("Share Summary")
                     Spacer()
                 }
             }
@@ -212,56 +233,96 @@ struct SettingsView: View {
     
     // MARK: - Preferences Section
     var functionalPreferencesSection: some View {
-           Section("Preferences") {
-               // Currency Selection - Now Functional
-               NavigationLink(destination: CurrencySelectionView()) {
-                   HStack {
-                       Image(systemName: "dollarsign.circle")
-                           .foregroundColor(ThemeColors.primary)
-                       Text("Currency")
-                       Spacer()
-                       Text(CurrencyManager.shared.selectedCurrency.code)
-                           .foregroundColor(ThemeColors.secondaryText)
-                           .font(.subheadline)
-                   }
-               }
-               
-               // Notifications (placeholder)
-               HStack {
-                   Image(systemName: "bell")
-                       .foregroundColor(ThemeColors.accent)
-                   Text("Notifications")
-                   Spacer()
-                   Toggle("", isOn: .constant(false))
-                       .disabled(true) // Placeholder
-               }
-               
-               // Theme (placeholder)
-               HStack {
-                   Image(systemName: "paintbrush")
-                       .foregroundColor(ThemeColors.success)
-                   Text("Theme")
-                   Spacer()
-                   Text("System")
-                       .foregroundColor(ThemeColors.secondaryText)
-                       .font(.subheadline)
-               }
-           }
-       }
+        Section("Preferences") {
+            // Currency Selection
+            NavigationLink(destination: CurrencySelectionView()) {
+                HStack {
+                    Image(systemName: "dollarsign.circle")
+                        .foregroundColor(ThemeColors.primary)
+                    Text("Currency")
+                    Spacer()
+                    Text(currencyManager.selectedCurrency.code)
+                        .foregroundColor(ThemeColors.secondaryText)
+                        .font(.subheadline)
+                }
+            }
+            
+            // Theme Selection
+            NavigationLink(destination: ThemeSelectionView()) {
+                HStack {
+                    Image(systemName: "paintbrush")
+                        .foregroundColor(ThemeColors.success)
+                    Text("Theme")
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: themeManager.selectedTheme.icon)
+                            .font(.caption)
+                        Text(themeManager.selectedTheme.displayName)
+                    }
+                    .foregroundColor(ThemeColors.secondaryText)
+                    .font(.subheadline)
+                }
+            }
+            
+            // Notifications - Now Functional
+            NavigationLink(destination: NotificationSettingsView().environmentObject(expenseStore)) {
+                HStack {
+                    Image(systemName: "bell")
+                        .foregroundColor(ThemeColors.accent)
+                    Text("Notifications")
+                    Spacer()
+                    HStack(spacing: 4) {
+                        if notificationManager.isNotificationsEnabled {
+                            let activeCount = [
+                                notificationManager.dailyReminderEnabled,
+                                notificationManager.weeklyReportEnabled,
+                                notificationManager.lentMoneyRemindersEnabled
+                            ].filter { $0 }.count
+                            
+                            if activeCount > 0 {
+                                Text("\(activeCount) active")
+                                    .foregroundColor(ThemeColors.accent)
+                            } else {
+                                Text("Enabled")
+                                    .foregroundColor(ThemeColors.success)
+                            }
+                        } else {
+                            Text("Off")
+                                .foregroundColor(ThemeColors.secondaryText)
+                        }
+                    }
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
     
     // MARK: - About Section
     private var aboutSection: some View {
         Section("About") {
+            // App Version
             HStack {
                 Image(systemName: "info.circle")
                     .foregroundColor(ThemeColors.primary)
                 Text("Version")
                 Spacer()
-                Text("1.0.0")
+                Text(Bundle.main.appVersion)
                     .foregroundColor(ThemeColors.secondaryText)
                     .font(.subheadline)
             }
             
+            // Build Number (for debugging)
+            HStack {
+                Image(systemName: "hammer")
+                    .foregroundColor(ThemeColors.secondary)
+                Text("Build")
+                Spacer()
+                Text(Bundle.main.buildNumber)
+                    .foregroundColor(ThemeColors.secondaryText)
+                    .font(.subheadline)
+            }
+            
+            // Privacy Policy
             Button(action: openPrivacyPolicy) {
                 HStack {
                     Image(systemName: "hand.raised")
@@ -274,18 +335,75 @@ struct SettingsView: View {
                 }
             }
             
+            // Contact Support
             Button(action: contactSupport) {
                 HStack {
                     Image(systemName: "envelope")
                         .foregroundColor(ThemeColors.success)
                     Text("Contact Support")
                     Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(ThemeColors.secondaryText)
+                }
+            }
+            
+            // Rate App
+            Button(action: rateApp) {
+                HStack {
+                    Image(systemName: "star")
+                        .foregroundColor(ThemeColors.primary)
+                    Text("Rate App")
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                        .foregroundColor(ThemeColors.secondaryText)
+                }
+            }
+            
+            // App Website
+            Button(action: openWebsite) {
+                HStack {
+                    Image(systemName: "globe")
+                        .foregroundColor(ThemeColors.accent)
+                    Text("Website")
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                        .foregroundColor(ThemeColors.secondaryText)
                 }
             }
         }
     }
     
     // MARK: - Computed Properties
+    
+    private func rateApp() {
+#if os(iOS)
+        if let url = URL(string: "itms-apps://itunes.apple.com/app/id123456789") {
+            UIApplication.shared.open(url)
+        }
+#elseif os(macOS)
+        if let url = URL(string: "macappstore://itunes.apple.com/app/id123456789") {
+            NSWorkspace.shared.open(url)
+        }
+#endif
+    }
+    
+    private func openWebsite() {
+        let websiteURL = "https://your-app-website.com"
+        
+#if os(iOS)
+        if let url = URL(string: websiteURL) {
+            UIApplication.shared.open(url)
+        }
+#elseif os(macOS)
+        if let url = URL(string: websiteURL) {
+            NSWorkspace.shared.open(url)
+        }
+#endif
+    }
+    
     private var syncStatusColor: Color {
         switch expenseStore.syncStatus {
         case "Ready", "Synced":
@@ -303,21 +421,21 @@ struct SettingsView: View {
     private func performManualSync() {
         expenseStore.performManualSync()
     }
-        
-    private func openPrivacyPolicy() {
-        // Open privacy policy URL
-        print("Opening privacy policy...")
-    }
     
-    private func contactSupport() {
-        // Open support contact
-        print("Contacting support...")
-    }
+    //    private func openPrivacyPolicy() {
+    //        // Open privacy policy URL
+    //        print("Opening privacy policy...")
+    //    }
+    //
+    //    private func contactSupport() {
+    //        // Open support contact
+    //        print("Contacting support...")
+    //    }
     
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.locale = Locale.current
+        formatter.locale = currencyManager.currentLocale
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
 }
@@ -390,11 +508,11 @@ extension SettingsView {
         // Generate comprehensive expense summary
         let summary = generateExpenseSummary()
         
-        #if os(iOS)
+#if os(iOS)
         presentShareSheet(with: summary)
-        #else
+#else
         copyToClipboard(summary)
-        #endif
+#endif
     }
     
     private func generateExpenseSummary() -> String {
@@ -512,7 +630,7 @@ extension SettingsView {
         
         // Average spending
         let daysSinceFirstExpense = expenses.isEmpty ? 1 :
-            max(1, calendar.dateComponents([.day], from: expenses.map { $0.date }.min() ?? now, to: now).day ?? 1)
+        max(1, calendar.dateComponents([.day], from: expenses.map { $0.date }.min() ?? now, to: now).day ?? 1)
         let averagePerDay = totalAmount / Double(daysSinceFirstExpense)
         
         summary += """
@@ -531,7 +649,7 @@ extension SettingsView {
         return summary
     }
     
-    #if os(iOS)
+#if os(iOS)
     private func presentShareSheet(with content: String) {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let window = windowScene.windows.first,
@@ -553,9 +671,9 @@ extension SettingsView {
         
         rootViewController.present(activityViewController, animated: true)
     }
-    #endif
+#endif
     
-    #if os(macOS)
+#if os(macOS)
     private func copyToClipboard(_ content: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -564,7 +682,131 @@ extension SettingsView {
         // Could add a toast notification here to indicate copy success
         print("Summary copied to clipboard")
     }
-    #endif
+#endif
+    
+    func openPrivacyPolicy() {
+        let privacyURL = "https://your-app-website.com/privacy"
+        
+#if os(iOS)
+        if let url = URL(string: privacyURL) {
+            UIApplication.shared.open(url)
+        }
+#elseif os(macOS)
+        if let url = URL(string: privacyURL) {
+            NSWorkspace.shared.open(url)
+        }
+#endif
+    }
+    
+    func contactSupport() {
+#if os(iOS)
+        presentSupportOptions()
+#elseif os(macOS)
+        openMailClient()
+#endif
+    }
+    
+#if os(iOS)
+    private func presentSupportOptions() {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            return
+        }
+        
+        let alertController = UIAlertController(
+            title: "Contact Support",
+            message: "How would you like to get help?",
+            preferredStyle: .actionSheet
+        )
+        
+        // Email option
+        alertController.addAction(UIAlertAction(title: "Send Email", style: .default) { _ in
+            self.openMailComposer()
+        })
+        
+        // Copy email option
+        alertController.addAction(UIAlertAction(title: "Copy Email Address", style: .default) { _ in
+            UIPasteboard.general.string = "support@expensetracker.com"
+            // You could show a toast here to confirm copy
+        })
+        
+        // Cancel option
+        alertController.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        // Configure for iPad
+        if let popover = alertController.popoverPresentationController {
+            popover.sourceView = window
+            popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        
+        rootViewController.present(alertController, animated: true)
+    }
+    
+    private func openMailComposer() {
+        guard MFMailComposeViewController.canSendMail() else {
+            // Fallback to copying email address
+            UIPasteboard.general.string = "support@expensetracker.com"
+            return
+        }
+        
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            return
+        }
+        
+        let mailComposer = MFMailComposeViewController()
+        mailComposer.mailComposeDelegate = MailDelegate.shared
+        mailComposer.setToRecipients(["support@expensetracker.com"])
+        mailComposer.setSubject("ExpenseTracker Support Request")
+        
+        let deviceInfo = """
+            
+            
+            ---
+            Device Information:
+            App Version: 1.0.0
+            iOS Version: \(UIDevice.current.systemVersion)
+            Device Model: \(UIDevice.current.model)
+            Total Expenses: \(expenseStore.expenses.count)
+            """
+        
+        mailComposer.setMessageBody("Hi ExpenseTracker Support,\n\nI need help with:\n\n[Please describe your issue here]\n\(deviceInfo)", isHTML: false)
+        
+        rootViewController.present(mailComposer, animated: true)
+    }
+#endif
+    
+#if os(macOS)
+    private func openMailClient() {
+        let subject = "ExpenseTracker Support Request"
+        let body = """
+            Hi ExpenseTracker Support,
+            
+            I need help with:
+            
+            [Please describe your issue here]
+            
+            
+            ---
+            Device Information:
+            App Version: 1.0.0
+            macOS Version: \(ProcessInfo.processInfo.operatingSystemVersionString)
+            Total Expenses: \(expenseStore.expenses.count)
+            """
+        
+        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        
+        let mailtoURL = "mailto:support@expensetracker.com?subject=\(encodedSubject)&body=\(encodedBody)"
+        
+        if let url = URL(string: mailtoURL) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+#endif
 }
 
 extension DateFormatter {
@@ -580,4 +822,31 @@ extension DateFormatter {
         formatter.dateFormat = "MMM dd"
         return formatter
     }()
+}
+
+// MARK: - Mail Delegate for iOS
+#if os(iOS)
+class MailDelegate: NSObject, MFMailComposeViewControllerDelegate {
+    static let shared = MailDelegate()
+    
+    func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+        controller.dismiss(animated: true)
+    }
+}
+#endif
+
+
+extension Bundle {
+    var appVersion: String {
+        return infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+    
+    var buildNumber: String {
+        return infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+    
+    var appName: String {
+        return infoDictionary?["CFBundleDisplayName"] as? String ??
+        infoDictionary?["CFBundleName"] as? String ?? "ExpenseTracker"
+    }
 }

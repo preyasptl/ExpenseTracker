@@ -10,6 +10,15 @@ import SwiftUI
 struct ExpenseRowView: View {
     let expense: Expense
     
+    @StateObject private var currencyManager = CurrencyManager.shared
+    
+    private func formatCurrency(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = currencyManager.selectedCurrency.locale
+        return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
+    }
+    
     var body: some View {
         HStack(spacing: 16) {
             // Category Icon
@@ -33,7 +42,7 @@ struct ExpenseRowView: View {
                     Spacer()
                     
                     // Amount
-                    Text(expense.formattedAmount)
+                    Text(formatCurrency(expense.amount))
                         .font(.headline)
                         .fontWeight(.semibold)
                         .foregroundColor(ThemeColors.text)

@@ -466,6 +466,7 @@ struct SummaryCard: View {
     var count: Int? = nil
     let icon: String
     let color: Color
+    @StateObject private var currencyManager = CurrencyManager.shared
     
     var body: some View {
         VStack(spacing: 8) {
@@ -504,7 +505,7 @@ struct SummaryCard: View {
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.locale = Locale.current
+        formatter.locale = currencyManager.currentLocale
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
 }

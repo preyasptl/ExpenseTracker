@@ -13,6 +13,10 @@ import Foundation
 class CurrencyManager: ObservableObject {
     static let shared = CurrencyManager()
     
+    var currentLocale: Locale {
+        return selectedCurrency.locale
+    }
+    
     @Published var selectedCurrency: Currency {
         didSet {
             UserDefaults.standard.set(selectedCurrency.code, forKey: "selectedCurrency")

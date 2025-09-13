@@ -12,6 +12,7 @@ struct AnalyticsView: View {
     @EnvironmentObject var expenseStore: ExpenseStore
     @State private var selectedTimeRange: TimeRange = .thisMonth
     @State private var selectedChartType: ChartType = .category
+    @StateObject private var currencyManager = CurrencyManager.shared
     
     enum TimeRange: String, CaseIterable {
         case thisMonth = "This Month"
@@ -433,7 +434,7 @@ struct AnalyticsView: View {
     private func formatCurrency(_ amount: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.locale = Locale.current
+        formatter.locale = currencyManager.currentLocale
         return formatter.string(from: NSNumber(value: amount)) ?? "$0.00"
     }
     
